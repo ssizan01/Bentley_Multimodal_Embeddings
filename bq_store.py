@@ -1,5 +1,8 @@
 """
-BigQuery storage and retrieval utilities for embeddings.
+BigQuery storage and retrieval utilities for embeddings (VECTOR_SEARCH version).
+
+- Stores embeddings as ARRAY<FLOAT64>.
+- Uses VECTOR_SEARCH with brute force (no index) for nearest-neighbor lookups.
 """
 from __future__ import annotations
 
@@ -31,6 +34,7 @@ def ensure_dataset_and_table(recreate: bool = False) -> None:
     _CLIENT.query(dataset_sql, location=config.BQ_LOCATION).result()
     logger.info("Ensured dataset %s exists (location: %s)", config.BQ_DATASET, config.BQ_LOCATION)
 
+    # ARRAY columns cannot be NOT NULL. Put DEFAULT before NOT NULL.
     table_sql = f"""
     CREATE TABLE IF NOT EXISTS {_fq_table()} (
       image_name STRING NOT NULL,
@@ -66,14 +70,23 @@ def load_embeddings(rows: Iterable[Dict[str, Any]], write_truncate: bool = False
 
 def top_k_by_cosine(query_vec: List[float], k: int) -> List[Dict[str, Any]]:
     """
-    Cosine similarity = 1 - ML.DISTANCE(a, b, 'COSINE').
+    Use BigQuery VECTOR_SEARCH (brute force) to find top-K neighbors by COSINE distance,
+    then convert to cosine similarity: 1 - distance.
     """
     sql = f"""
     SELECT
-      image_name,
-      rel_path,
-      1 - ML.DISTANCE(embedding, @qvec, 'COSINE') AS cosine_sim
-    FROM {_fq_table()}
+      base.image_name,
+      base.rel_path,
+      1 - distance AS cosine_sim
+    FROM VECTOR_SEARCH(
+      TABLE {_fq_table()},
+      'embedding',                          -- column_to_search in base table
+      (SELECT @qvec AS embedding),          -- query_table as subquery returning a single vector
+      'embedding',                          -- query_column_to_search
+      top_k => @k,
+      distance_type => 'COSINE',
+      options => '{{"use_brute_force": true}}'
+    )
     ORDER BY cosine_sim DESC
     LIMIT @k
     """
