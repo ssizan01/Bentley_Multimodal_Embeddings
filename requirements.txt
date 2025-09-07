@@ -1,0 +1,10 @@
+google-cloud-aiplatform
+google-cloud-bigquery
+google-cloud-bigquery-storage
+google-auth
+pandas
+pyarrow
+db-dtypes
+google-genai
+nicegui
+tabulate
